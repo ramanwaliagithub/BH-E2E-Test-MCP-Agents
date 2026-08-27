@@ -41,7 +41,7 @@ Python specifically because it's the language most QA orgs already standardize o
 |---|---|
 | API — Node.js | `cd api-tests && npm install && npm test` |
 | API — Python | `cd api-tests-python && pip install -r requirements.txt && pytest -v` |
-| UI — Playwright | `cd ui-tests && pip install -r requirements.txt && playwright install && pytest -v` |
+| UI — Playwright | `cd ui-tests && uv sync && uv run playwright install && uv run pytest -v` |
 
 Each suite has a `.env.example` — copy to `.env.local` to override defaults (public demo credentials / reqres.in's public demo API key, both safe to keep as-is).
 
