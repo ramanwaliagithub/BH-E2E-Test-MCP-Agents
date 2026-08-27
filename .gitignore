@@ -1,0 +1,64 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+build/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+.venv/
+venv/
+ENV/
+env/
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test reports
+coverage/
+htmlcov/
+.coverage
+*.xml
+allure-results/
+allure-report/
+
+# Test files - extended/additional tests not included in CI/CD
+**/*.additional.test.js
+ui-tests/tests/test_additional_flows.py
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+.auth/
