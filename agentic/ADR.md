@@ -3,8 +3,9 @@
 ## Status
 
 Accepted (2026-08-26). Covers `agentic/mcp_client.py`, `agentic/agent_loop.py`,
-and the first agent, `agentic/agents/locator_healer.py`. See
-`AGENTIC_BUILD_LOG.md` for the file-by-file build history.
+and the first two agents, `agentic/agents/locator_healer.py` and
+`agentic/agents/test_author.py`. See `AGENTIC_BUILD_LOG.md` for the
+file-by-file build history.
 
 ## Context
 
@@ -68,16 +69,26 @@ of control flow that runs is visible in one file.
 
 ### Where the human-in-the-loop gate sits
 
-Agents write **nothing** directly to `ui-tests/tests/` or `ui-tests/pages/`.
-The locator healer's `heal_locator()` returns `(verdict, diff)` — a parsed JSON
-verdict and a `difflib.unified_diff` string — and stops there. `main()` prints
-both. No agent in this layer ever calls `Path.write_text()` on a file under
-`ui-tests/`. The gate is structural, not a policy someone has to remember to
-enforce: applying a diff means a human runs `git apply` (or pastes it into an
-editor) and opens a PR like any other change — normal code review, not
-auto-merge. The same pattern will extend to the test-authoring and smoke-crawler
-agents once built: they propose file content or a drift report; a human decides
-whether it becomes a commit.
+The two gates differ by agent, matched to what each one actually needs to do.
+The locator healer never touches `ui-tests/` at all — `heal_locator()`
+returns `(verdict, diff)` and `main()` prints both; no `Path.write_text()` on
+an existing file, ever. Applying it means a human runs `git apply` (or pastes
+the diff into an editor) and commits like any other change.
+
+The test author's whole job is different — "emit a new test file" is the
+deliverable, not a diff — so `test_author.py` *does* call
+`Path.write_text()`, but only for a brand-new file (`main()` refuses to
+overwrite an existing one without `--force`); it never modifies a file that
+already exists. The gate for this one is downstream, not structural: the
+generated file lands in the working tree same as anything else in this repo,
+and nothing in this layer stages it, commits it, or pushes it — that's a
+separate, deliberate human action (`git add`/`git commit`), same review step
+every other change here goes through, and the CI workflow only ever runs
+whatever's already been committed and pushed to `main`.
+
+The same "propose, don't auto-commit" spirit will extend to the smoke-crawler
+agent once built: it proposes a drift report, not a file; a human decides
+whether it becomes anything at all.
 
 ### How this fits CI without touching the deterministic pipeline
 

@@ -21,13 +21,17 @@ test depended on.
 
 `agentic/` solves a narrower problem: **give an AI agent a real, controllable
 browser, and a direct line to Claude, so it can look at a page and reason
-about what changed.** Concretely, right now, that means one working agent:
-the **self-healing locator agent** — point it at a broken locator, and it logs
-into the site, looks at the page, and proposes a fixed selector as a diff for
-a human to review.
+about what changed.** Concretely, right now, that means two working agents:
+- the **self-healing locator agent** — point it at a broken locator, and it
+  logs into the site, looks at the page, and proposes a fixed selector as a
+  diff for a human to review.
+- the **natural-language test author** — give it a plain-English scenario,
+  and it walks the live site to confirm the flow actually works, then emits a
+  new pytest test file matching this repo's real Page Object conventions
+  (read from disk, not guessed).
 
-Two future agents are designed for but not yet built (see "Not built yet"
-below): a natural-language test author, and an autonomous smoke-crawler.
+A third agent is designed for but not yet built (see "Not built yet" below):
+an autonomous smoke-crawler.
 
 ## How it actually works, step by step
 
@@ -42,10 +46,15 @@ below): a natural-language test author, and an autonomous smoke-crawler.
    snapshot of the page") → the loop actually runs that action via
    `mcp_client.py` → the result goes back to Claude → repeat until Claude has
    a final answer.
-4. **`agents/locator_healer.py`** is the actual task: "here's a broken
-   locator, here's what it's supposed to do, here's the page — go find it."
-   It runs the loop above, then turns Claude's final answer into a one-line
-   code diff. It never edits your files — it only prints/returns the diff.
+4. **`agents/locator_healer.py`** is one task built on that loop: "here's a
+   broken locator, here's what it's supposed to do, here's the page — go find
+   it." It turns Claude's final answer into a one-line code diff. It never
+   edits your files — it only prints/returns the diff.
+5. **`agents/test_author.py`** is a different task on the same loop: "here's
+   a scenario in plain English." It reads your *real* Page Objects, fixtures,
+   and markers off disk first (so it can't invent a convention that doesn't
+   exist), walks the scenario live to confirm it actually works, then writes
+   a new pytest test file matching that style.
 
 ## File-by-file map
 
@@ -54,26 +63,23 @@ below): a natural-language test author, and an autonomous smoke-crawler.
 | `mcp_config.json` | Settings saying how to start the AI-controllable browser | Keeps that config out of your real `pytest.ini`/CI setup entirely |
 | `mcp_client.py` | Connects to the browser service, lists its actions, wraps them for Claude | The one place that knows how to "speak MCP" — nothing else needs to |
 | `agent_loop.py` | The reusable "ask Claude → run the action it wants → repeat" loop | Every agent (healer, and future ones) shares this instead of reinventing it |
-| `agents/locator_healer.py` | The self-healing locator agent itself | The actual working deliverable — finds a broken locator's replacement |
+| `agents/locator_healer.py` | The self-healing locator agent | Finds a broken locator's replacement, proposes a diff |
+| `agents/test_author.py` | The natural-language test authoring agent | Turns a plain-English scenario into a new, convention-matching pytest file |
 | `.env.example` | Template showing what secret config is needed | Documents the required `ANTHROPIC_API_KEY` without committing a real one |
 | `.env.local` | Your real secret key (you created this, gitignored) | Lets `agent_loop.py` authenticate to Claude without hardcoding a key in code |
 | `ADR.md` | Why-we-built-it-this-way document | Explains MCP vs. plain Playwright, why no LangChain, where human review sits, how CI stays untouched |
 | `__init__.py` / `agents/__init__.py` | Empty marker files | Makes `agentic` and `agentic.agents` proper importable Python packages |
 
 Everything above exists already — nothing on this list is still to be created
-for the locator healer specifically.
+for either agent.
 
 ## Not built yet (from the original goals, still open)
 
-- **Natural-language test author** — given a plain-English scenario, explore
-  the app via MCP and generate a real pytest/POM test file (not a one-off
-  script).
 - **Exploratory/autonomous smoke agent** — crawls key flows each run and
   flags drift before it breaks scripted tests. Per the ADR, this one would
   need its own separate, non-blocking CI workflow (never a required check).
-
-Both would reuse `mcp_client.py` and `agent_loop.py` as-is — only a new file
-under `agents/` (plus its own tool allow-list and prompt) is needed for each.
+  Would reuse `mcp_client.py` and `agent_loop.py` as-is — only a new file
+  under `agents/` (plus its own tool allow-list and prompt) is needed.
 
 ## Two ways to build "the brain" — and a third way to test for free
 
@@ -112,12 +118,16 @@ skill instead of the standalone script described in the original goals.
   it only ever returns a diff for a human to review and apply, same as any
   other pull request.
 
-## Running the demo (once billing is sorted)
+## Running the demos (once billing is sorted)
+
+Run from the repo root, with `node`/`npx` on `PATH` and a funded key in
+`agentic/.env.local`.
+
+**Locator healer** — requires `ADD_TO_CART_BUTTON` in
+`ui-tests/pages/inventory_page.py` to actually be broken first (it already is
+in this repo, for exactly this purpose — see `AGENTIC_BUILD_LOG.md`):
 
 ```bash
-export PATH="/c/Program Files/nodejs:$PATH"   # only if node/npx isn't already on PATH
-cd /c/projects/BH-E2E-Tests
-
 ui-tests/.venv/Scripts/python.exe -m agentic.agents.locator_healer \
   --pom "ui-tests/pages/inventory_page.py" \
   --class-name InventoryPage \
@@ -129,6 +139,14 @@ ui-tests/.venv/Scripts/python.exe -m agentic.agents.locator_healer \
   --password secret_sauce
 ```
 
-Requires `ADD_TO_CART_BUTTON` in `ui-tests/pages/inventory_page.py` to
-actually be broken first (see `AGENTIC_BUILD_LOG.md` for the exact one-line
-edit used during development), and a funded key in `agentic/.env.local`.
+**Test author** — no setup required, writes a new file under
+`ui-tests/tests/`:
+
+```bash
+ui-tests/.venv/Scripts/python.exe -m agentic.agents.test_author \
+  --scenario "Add the Sauce Labs Backpack and the Bike Light to the cart, then verify the cart shows 2 items" \
+  --output test_multi_item_cart.py \
+  --login-url "https://www.saucedemo.com" \
+  --username standard_user \
+  --password secret_sauce
+```
