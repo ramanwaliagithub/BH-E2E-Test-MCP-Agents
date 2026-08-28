@@ -1,0 +1,33 @@
+[
+  {
+    "tool": "browser_navigate",
+    "args": { "url": "https://www.saucedemo.com" }
+  },
+  {
+    "tool": "browser_fill_form",
+    "args": {
+      "fields": [
+        { "target": "input[data-test='username']", "name": "Username", "type": "textbox", "value": "standard_user" },
+        { "target": "input[data-test='password']", "name": "Password", "type": "textbox", "value": "secret_sauce" }
+      ]
+    }
+  },
+  {
+    "tool": "browser_click",
+    "args": { "target": "input[data-test='login-button']", "element": "Login button" }
+  },
+  {
+    "tool": "browser_click",
+    "args": { "target": "button[data-test='add-to-cart-sauce-labs-backpack']", "element": "Add to cart button for Sauce Labs Backpack" }
+  },
+  {
+    "tool": "browser_snapshot",
+    "args": {}
+  },
+  {
+    "tool": "browser_evaluate",
+    "args": {
+      "function": "() => { const container = Array.from(document.querySelectorAll('.inventory_item')).find(el => el.textContent.includes('Sauce Labs Backpack')); if (!container) return { found: false, reason: 'container not found' }; const btn = Array.from(container.querySelectorAll('button')).find(b => /remove/i.test(b.textContent)); if (!btn) return { found: false, containerFound: true, reason: 'remove button not found in container' }; return { found: true, dataTest: btn.getAttribute('data-test'), id: btn.id || null, classes: btn.className || null, text: btn.textContent.trim() }; }"
+    }
+  }
+]
