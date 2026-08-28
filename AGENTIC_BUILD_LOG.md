@@ -639,3 +639,127 @@ directory removed.
 `agentic-claude-code/examples/heal_remove_from_cart_button.steps.json` — kept
 as a second documented example, distinct from the first one in that it needs
 a state-changing action (add to cart) before the target element even exists.
+
+---
+
+## 2026-08-28 — GitHub push: baseline + full history reconstruction
+
+Pushed to `github.com/ramanwaliagithub/BH-E2E-Test-MCP-Agents` on branch
+`main`, as two phases per user request: a baseline commit representing the
+repo exactly as it was before any MCP/agentic work, then the real
+step-by-step history layered on top as separate reviewed commits.
+
+**Environment note discovered mid-task:** this session's working directory
+resolves to `D:\Work\Github\BH-E2E-Tests` — a different path from
+`C:\projects\BH-E2E-Tests`, which every earlier command in this log used.
+Both pointed at the same underlying files (some drive alias/mount from the
+prior environment), but that alias is not present in this shell — confirmed
+by `ui-tests/.venv` referencing a now-nonexistent interpreter path
+(`C:\Users\rwalia\...`) under a different Windows user account than this one
+(`hp`). Fixed by deleting and recreating `.venv` via `uv sync --extra
+agentic` in this environment — a pure build-artifact rebuild, already
+gitignored, no source impact. Re-verified `MCPClient` still connects
+(24 tools) after the rebuild. All file paths in this log from this point on
+use `D:\Work\Github\BH-E2E-Tests`.
+
+**Baseline commit** (`edeb175`): temporarily reverted 5 files to their exact
+pre-MCP content — `README.md`, `.github/workflows/tests.yml`, `.gitignore`,
+`ui-tests/pages/inventory_page.py` (real, unbroken locators), and recreated
+the deleted `ui-tests/requirements.txt` — reversing my own earlier `Edit`
+calls exactly (old_string/new_string swapped) rather than retyping from
+memory, for byte-perfect accuracy. New-only content (`agentic/`,
+`agentic-claude-code/`, `.claude/skills/`, `AGENTIC_BUILD_LOG.md`,
+`ui-tests/pyproject.toml`/`uv.lock`) simply stayed untracked — never moved or
+deleted. Took a full working-tree backup to the scratchpad first as a safety
+net; diffed all 3 non-locator files against it afterward to confirm
+byte-perfect restoration to final state.
+
+**Branch name:** user chose `main` over `master` (which `tests.yml` already
+hardcoded) — folded the trigger-branch update into the uv-migration commit
+since both touch the same file, with a note in that commit's message.
+
+**Locator state decision:** user chose to keep both `ADD_TO_CART_BUTTON` and
+`REMOVE_FROM_CART_BUTTON` broken in the final pushed history (not restore
+them) — each break now lands in the commit where it chronologically
+happened (`ADD_TO_CART_BUTTON` with the locator-healer agent commit,
+`REMOVE_FROM_CART_BUTTON` with the agentic-claude-code commit), original
+value preserved as a comment above each, matching the existing pattern.
+
+**7 layered commits after the baseline**, one per real development step,
+each shown for review (diff stat + proposed message) and pushed individually
+per user's chosen cadence:
+1. `dddb757` uv migration (+ branch trigger fix)
+2. `464a4fe` agentic/ MCP client + config
+3. `7b0c026` agent_loop.py
+4. `eaedad9` locator_healer.py + ADD_TO_CART_BUTTON break
+5. `f97a742` agentic/ ADR + README
+6. `26ea4d3` agentic-claude-code/ + heal-locator-cc skill + REMOVE_FROM_CART_BUTTON break
+7. `b500174` root README pointer + this build log
+
+**Verification after every push:** `git check-ignore agentic/.env.local`
+before the first commit, and after the last commit,
+`git log --all --full-history -- "**/.env.local"` returned empty — confirmed
+the real API key was never staged in any commit.
+
+**One transient issue:** `git push` failed twice with
+`Could not resolve host: github.com` while `curl`/`gh api` both succeeded
+against the same host — resolved itself on retry (`GIT_CURL_VERBOSE=1 git
+ls-remote` showed a normal successful connection); no config change needed.
+
+---
+
+## 2026-08-28 — Second agent: `agentic/agents/test_author.py`
+
+Original goals asked for three agents in `agentic/`: the self-healing locator
+agent (built), a natural-language test-authoring agent, and an exploratory
+smoke-crawler agent. This is the second one. Not yet run live — same blocker
+as the locator healer (`agentic/.env.local`'s Anthropic account still has no
+funded credit balance) — but the pure logic is built and tested.
+
+**Why it needed no new infrastructure:** reuses `agent_loop.py` and
+`mcp_client.py` exactly as-is — the only new work is (1) grounding the model
+in this repo's *real* conventions instead of letting it invent plausible-
+looking ones, and (2) turning its final answer into a validated file.
+
+**Design:**
+- `gather_pom_conventions()` reads the actual `ui-tests/pages/*.py`,
+  `conftest.py`, `pytest.ini`, and `test_login_flow.py` (as a style
+  reference) from disk and hands them to the model verbatim — so it can't
+  invent a Page Object method, fixture, or marker that doesn't exist. Stays
+  accurate automatically as the real POM evolves, since nothing is
+  hardcoded.
+- System prompt requires the agent to **walk the scenario live first** (same
+  navigate/login/click/snapshot tools as the locator healer) before writing
+  anything, and to verify any raw selector it falls back to (this repo's own
+  precedent: `add_product_to_cart("button[data-test='...']")` with a literal
+  selector, not a wrapped method) against the live DOM rather than memory —
+  same "ground truth over guesswork" principle as `locator_healer.py`.
+- Explicitly forbidden from inventing new Page Object classes/methods; told
+  to leave a comment instead if the scenario genuinely needs one.
+- `extract_python_code()` pulls the fenced ` ```python ` block from the final
+  answer; `author_test()` then runs the result through `ast.parse()` before
+  ever writing a file — a syntactically invalid generation fails loudly
+  instead of landing a broken test file in `ui-tests/tests/`.
+- `main()` refuses to overwrite an existing test file unless `--force` is
+  passed.
+
+**Commands run (pure-logic verification only, no API key needed):**
+```bash
+python -c "import ast; ast.parse(open('agentic/agents/test_author.py').read())"  # syntax check
+
+# scratch script:
+#   gather_pom_conventions(ui_tests_dir) against the REAL ui-tests/ files —
+#     asserted it actually contains "class LoginPage", "class InventoryPage",
+#     "env_config", and the pytest markers
+#   extract_python_code() on a fenced block (succeeds) and on text with no
+#     fenced block (raises ValueError as expected)
+#   ast.parse() on deliberately invalid Python (raises SyntaxError as expected)
+```
+**Result:** all assertions passed. Also re-verified `MCPClient` connects live
+(24 tools) after the `.venv` rebuild above — confirms the shared MCP
+infrastructure this agent depends on is unaffected.
+
+**Not yet run end-to-end** — pending a funded `ANTHROPIC_API_KEY`, same as
+`locator_healer.py`. Planned demo scenario once unblocked: "add the Sauce
+Labs Backpack and the Bike Light to the cart, then verify the cart shows 2
+items" — a real scenario not already covered by `test_login_flow.py`.
