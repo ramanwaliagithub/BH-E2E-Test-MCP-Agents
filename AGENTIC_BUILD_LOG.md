@@ -763,3 +763,62 @@ infrastructure this agent depends on is unaffected.
 `locator_healer.py`. Planned demo scenario once unblocked: "add the Sauce
 Labs Backpack and the Bike Light to the cart, then verify the cart shows 2
 items" — a real scenario not already covered by `test_login_flow.py`.
+
+---
+
+## 2026-08-28 — Third agent: `agentic/agents/smoke_crawler.py`
+
+The third and last agent from the original plan. Also not yet run live —
+same billing blocker — but pure logic is built and tested. This one is
+architecturally the odd one out: the other two agents produce something (a
+diff, a new file); this one produces **only a report** — it never fixes or
+authors anything, matching the "propose a drift report; a human decides
+whether it becomes anything at all" language already written into `ADR.md`
+before this file existed.
+
+**Design:**
+- Reuses `agent_loop.py`/`mcp_client.py` unchanged, same `ALLOWED_TOOLS` set
+  as the other two agents (no new MCP wiring needed for a third agent — this
+  confirms the shared infrastructure decision from agent #1 was the right
+  call).
+- Instead of maintaining a separate list of "key flows to check" (which
+  would drift from the real tests over time), it hands the **entire real
+  source** of `ui-tests/tests/test_login_flow.py` to the model as-is — each
+  `test_*` function's docstring and body *is* the flow definition and the
+  expected behavior. Single source of truth; nothing to keep in sync.
+- Classifies each flow as `ok` / `drift` / `broken` rather than a binary
+  pass/fail — `drift` exists specifically to catch "the flow still
+  technically works but something about it quietly changed," which a rigid
+  pytest assertion wouldn't surface but a model reasoning over a live
+  snapshot can.
+- `extract_json()` duplicates the same small fenced/plain JSON parser
+  already in `locator_healer.py` rather than factoring it into a shared
+  helper — two call sites in the same package is still below the threshold
+  where a shared abstraction pays for itself.
+- `save_report()` writes timestamped JSON reports under `agentic/reports/`
+  — a new gitignored directory (generated output, not source, same
+  treatment as `.playwright-mcp/`) — so a history of crawls can accumulate
+  locally without touching git.
+- `max_iterations` raised to 40 (vs. the other agents' default 15) since
+  walking multiple flows in one run needs more tool-call turns than healing
+  one locator or authoring one test.
+
+**Commands run (pure-logic verification only, no API key needed):**
+```bash
+python -c "import ast; ast.parse(open('agentic/agents/smoke_crawler.py').read())"  # syntax check
+
+# scratch script:
+#   extract_json() on plain and ```json-fenced JSON strings
+#   save_report() round-tripped through a real temp directory, reloaded and
+#     compared equal to the original dict
+#   print_summary() against a 2-flow report (1 ok, 1 drift) — printed the
+#     expected "N flows checked: ... " line and the drift finding
+```
+**Result:** all assertions passed.
+
+**Not yet run end-to-end** — pending a funded `ANTHROPIC_API_KEY`, same as
+the other two agents. Once unblocked, running it against the real (currently
+broken) `ADD_TO_CART_BUTTON`/`REMOVE_FROM_CART_BUTTON` locators should
+independently flag both as `drift` or `broken` via `test_complete_purchase_flow`
+— the same two breaks the other two agents already fixed by different means,
+which would make a clean three-agent demo against one shared repo state.

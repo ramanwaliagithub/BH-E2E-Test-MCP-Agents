@@ -2,9 +2,11 @@
 
 This folder is a separate, optional add-on to the test suite. It lets an AI
 agent (Claude) drive a real browser itself to do things a fixed script can't:
-find a broken locator's replacement, or (later) explore the app and flag when
-something changed. It never runs in CI and never edits your test files
-directly — see "How it fits with the rest of the repo" below.
+find a broken locator's replacement, author a new test from a plain-English
+description, or explore the app and flag when something changed. It never
+runs in CI, and the only agent that writes anything is the test author — and
+only ever a brand-new file, never an existing one — see "How it fits with
+the rest of the repo" below.
 
 For the *why* behind each architecture choice, see [`ADR.md`](ADR.md). For a
 chronological, command-by-command history of every change, see
@@ -21,7 +23,7 @@ test depended on.
 
 `agentic/` solves a narrower problem: **give an AI agent a real, controllable
 browser, and a direct line to Claude, so it can look at a page and reason
-about what changed.** Concretely, right now, that means two working agents:
+about what changed.** All three agents from the original plan are now built:
 - the **self-healing locator agent** — point it at a broken locator, and it
   logs into the site, looks at the page, and proposes a fixed selector as a
   diff for a human to review.
@@ -29,9 +31,10 @@ about what changed.** Concretely, right now, that means two working agents:
   and it walks the live site to confirm the flow actually works, then emits a
   new pytest test file matching this repo's real Page Object conventions
   (read from disk, not guessed).
-
-A third agent is designed for but not yet built (see "Not built yet" below):
-an autonomous smoke-crawler.
+- the **smoke-crawler** — give it an existing test file, and it walks every
+  flow in it live, then reports whether each one still behaves the way the
+  test assumes — it never fixes or writes anything, only flags `ok` /
+  `drift` / `broken` per flow for a human to act on.
 
 ## How it actually works, step by step
 
@@ -55,6 +58,11 @@ an autonomous smoke-crawler.
    and markers off disk first (so it can't invent a convention that doesn't
    exist), walks the scenario live to confirm it actually works, then writes
    a new pytest test file matching that style.
+6. **`agents/smoke_crawler.py`** is the read-only task on the same loop:
+   "here's an existing test file." It hands the whole file to Claude as the
+   definition of what flows matter and what they're supposed to do, walks
+   each one live, and reports `ok`/`drift`/`broken` per flow — no diff, no
+   new file, just a report for a human to act on.
 
 ## File-by-file map
 
@@ -62,24 +70,28 @@ an autonomous smoke-crawler.
 |---|---|---|
 | `mcp_config.json` | Settings saying how to start the AI-controllable browser | Keeps that config out of your real `pytest.ini`/CI setup entirely |
 | `mcp_client.py` | Connects to the browser service, lists its actions, wraps them for Claude | The one place that knows how to "speak MCP" — nothing else needs to |
-| `agent_loop.py` | The reusable "ask Claude → run the action it wants → repeat" loop | Every agent (healer, and future ones) shares this instead of reinventing it |
+| `agent_loop.py` | The reusable "ask Claude → run the action it wants → repeat" loop | All three agents share this instead of reinventing it |
 | `agents/locator_healer.py` | The self-healing locator agent | Finds a broken locator's replacement, proposes a diff |
 | `agents/test_author.py` | The natural-language test authoring agent | Turns a plain-English scenario into a new, convention-matching pytest file |
+| `agents/smoke_crawler.py` | The exploratory smoke-crawler agent | Walks existing flows live, reports drift — fixes nothing |
+| `reports/` | Timestamped JSON drift reports (gitignored) | Where `smoke_crawler.py` saves its output — generated, not source |
 | `.env.example` | Template showing what secret config is needed | Documents the required `ANTHROPIC_API_KEY` without committing a real one |
 | `.env.local` | Your real secret key (you created this, gitignored) | Lets `agent_loop.py` authenticate to Claude without hardcoding a key in code |
 | `ADR.md` | Why-we-built-it-this-way document | Explains MCP vs. plain Playwright, why no LangChain, where human review sits, how CI stays untouched |
 | `__init__.py` / `agents/__init__.py` | Empty marker files | Makes `agentic` and `agentic.agents` proper importable Python packages |
 
-Everything above exists already — nothing on this list is still to be created
-for either agent.
+Everything above exists already — **all three agents from the original plan
+are built.** Nothing on this list is still to be created.
 
-## Not built yet (from the original goals, still open)
+## What's left
 
-- **Exploratory/autonomous smoke agent** — crawls key flows each run and
-  flags drift before it breaks scripted tests. Per the ADR, this one would
-  need its own separate, non-blocking CI workflow (never a required check).
-  Would reuse `mcp_client.py` and `agent_loop.py` as-is — only a new file
-  under `agents/` (plus its own tool allow-list and prompt) is needed.
+All three agents are built, but **none have run live yet** — every one is
+blocked at the same first real Claude API call, pending a funded
+`ANTHROPIC_API_KEY` (see "Running the demos" below). Once that's sorted, the
+smoke-crawler is also the one agent that would eventually want its own
+separate, non-blocking CI workflow (per the ADR — never a required check) so
+it can run on a schedule instead of only on demand; that workflow file itself
+hasn't been written yet.
 
 ## Two ways to build "the brain" — and a third way to test for free
 
@@ -150,3 +162,15 @@ ui-tests/.venv/Scripts/python.exe -m agentic.agents.test_author \
   --username standard_user \
   --password secret_sauce
 ```
+
+**Smoke crawler** — read-only, writes a timestamped report under
+`agentic/reports/`, defaults already point at the real test file:
+
+```bash
+ui-tests/.venv/Scripts/python.exe -m agentic.agents.smoke_crawler
+```
+
+With `ADD_TO_CART_BUTTON`/`REMOVE_FROM_CART_BUTTON` currently broken in this
+repo, this should independently flag `test_complete_purchase_flow` as
+`drift` or `broken` — the same breaks the locator healer and test author
+demos above already interact with, via a third, entirely different lens.

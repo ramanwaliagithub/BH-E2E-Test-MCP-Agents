@@ -86,9 +86,11 @@ separate, deliberate human action (`git add`/`git commit`), same review step
 every other change here goes through, and the CI workflow only ever runs
 whatever's already been committed and pushed to `main`.
 
-The same "propose, don't auto-commit" spirit will extend to the smoke-crawler
-agent once built: it proposes a drift report, not a file; a human decides
-whether it becomes anything at all.
+The same "propose, don't auto-commit" spirit applies to the smoke-crawler
+agent (`agentic/agents/smoke_crawler.py`): it never even writes to
+`ui-tests/` — it only ever writes a timestamped JSON report under the
+gitignored `agentic/reports/`. It proposes a drift report, not a file or a
+diff; a human decides whether it becomes anything at all.
 
 ### How this fits CI without touching the deterministic pipeline
 
@@ -99,9 +101,10 @@ install `anthropic`/`mcp` into the CI environment, since they're an opt-in
 dependency group. `agentic/mcp_config.json` is a separate file from the root
 `.mcp.json` Claude Code's own session uses, and `agentic/.env.local` is
 gitignored, so there's no shared state between "an agent ran locally" and "CI
-ran." If/when the smoke-crawler agent is built, the plan is a *separate*,
-manually- or schedule-triggered workflow that posts drift findings as an issue
-or PR comment — never a required status check the deterministic suites depend
+ran." The smoke-crawler agent itself is built; what's still open is wiring
+it into CI at all — the plan is a *separate*, manually- or schedule-triggered
+workflow that posts drift findings as an issue or PR comment — never a
+required status check the deterministic suites depend
 on. An agent run that fails, times out, or produces nonsense should never be
 able to block or flake a regression build.
 
