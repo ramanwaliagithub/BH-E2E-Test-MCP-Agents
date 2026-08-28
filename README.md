@@ -32,6 +32,8 @@ Python specifically because it's the language most QA orgs already standardize o
 ├── ui-tests/             # Python Playwright tests
 │   ├── pages/            # Page Object Model
 │   └── tests/test_login_flow.py
+├── agentic/              # AI agent layer, standalone (own Anthropic API key) — not part of CI
+├── agentic-claude-code/  # AI agent layer, driven by Claude Code itself — not part of CI
 └── .github/workflows/tests.yml   # CI pipeline
 ```
 
@@ -44,6 +46,15 @@ Python specifically because it's the language most QA orgs already standardize o
 | UI — Playwright | `cd ui-tests && uv sync && uv run playwright install && uv run pytest -v` |
 
 Each suite has a `.env.example` — copy to `.env.local` to override defaults (public demo credentials / reqres.in's public demo API key, both safe to keep as-is).
+
+## AI-Driven Exploration (optional, not part of CI)
+
+Two separate, experimental sibling projects explore using an LLM agent to drive a real browser via [Playwright MCP](https://github.com/microsoft/playwright-mcp) — starting with a self-healing locator agent (given a broken POM locator, it re-locates the element on the live page and proposes a fix as a diff, never an auto-edit). Neither runs in CI, neither can write to `ui-tests/pages/` or `ui-tests/tests/` directly, and neither depends on the other:
+
+- **[`agentic/`](agentic/README.md)** — a standalone Python agent that calls the Anthropic API directly (its own `ANTHROPIC_API_KEY`, billed separately from any Claude subscription).
+- **[`agentic-claude-code/`](agentic-claude-code/README.md)** — the same idea with no second API call: a Claude Code session itself does the reasoning, using an invokable skill (`.claude/skills/heal-locator-cc/`) instead of a standalone script.
+
+Full history of both, file by file and command by command, is in [AGENTIC_BUILD_LOG.md](AGENTIC_BUILD_LOG.md).
 
 ## CI/CD Pipeline
 
