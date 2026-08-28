@@ -10,7 +10,8 @@ class InventoryPage:
     # Locators
     PRODUCT_ITEM = ".inventory_item"
     PRODUCT_NAME = ".inventory_item_name"
-    ADD_TO_CART_BUTTON = "button[data-test='add-to-cart-sauce-labs-backpack']"
+    # ADD_TO_CART_BUTTON = "button[data-test='add-to-cart-sauce-labs-backpack']"
+    ADD_TO_CART_BUTTON = "button[data-test='add-to-cart-sauce-labs-backpack-OLD-RENAMED']"
     REMOVE_FROM_CART_BUTTON = "button[data-test='remove-sauce-labs-backpack']"
     CART_BADGE = ".shopping_cart_badge"
     CART_LINK = ".shopping_cart_link"
