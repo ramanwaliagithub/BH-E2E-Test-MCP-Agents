@@ -49,16 +49,16 @@ Each suite has a `.env.example` — copy to `.env.local` to override defaults (p
 
 ## AI-Driven Exploration (optional, not part of CI)
 
-Two separate, experimental sibling projects explore using an LLM agent to drive a real browser via [Playwright MCP](https://github.com/microsoft/playwright-mcp) — starting with a self-healing locator agent (given a broken POM locator, it re-locates the element on the live page and proposes a fix as a diff, never an auto-edit). Neither runs in CI, neither can write to `ui-tests/pages/` or `ui-tests/tests/` directly, and neither depends on the other:
+Two separate, experimental sibling projects explore using an LLM agent to drive a real browser via [Playwright MCP](https://github.com/microsoft/playwright-mcp), each implementing the same three agents: a **self-healing locator agent** (given a broken POM locator, re-locates the element live and proposes a fix as a diff — never an auto-edit), a **natural-language test author** (given a plain-English scenario, walks it live and writes a new pytest file matching this repo's real conventions), and an **exploratory smoke-crawler** (walks an existing test file's flows live and reports drift — fixes nothing). Neither runs in CI, and neither depends on the other. Only the test-authoring agent writes anything, and only ever a brand-new file under `ui-tests/tests/` — never an existing one:
 
-- **[`agentic/`](agentic/README.md)** — a standalone Python agent that calls the Anthropic API directly (its own `ANTHROPIC_API_KEY`, billed separately from any Claude subscription).
-- **[`agentic-claude-code/`](agentic-claude-code/README.md)** — the same idea with no second API call: a Claude Code session itself does the reasoning, using an invokable skill (`.claude/skills/heal-locator-cc/`) instead of a standalone script.
+- **[`agentic/`](agentic/README.md)** — standalone Python agents that call the Anthropic API directly (their own `ANTHROPIC_API_KEY`, billed separately from any Claude subscription). All three are built; none have run live yet pending a funded API account.
+- **[`agentic-claude-code/`](agentic-claude-code/README.md)** — the same three agents with no second API call: a Claude Code session itself does the reasoning, via three invokable skills (`.claude/skills/heal-locator-cc/`, `author-test-cc/`, `crawl-flows-cc/`). All three have actually run live, at zero cost — including a test the author agent generated (`ui-tests/tests/test_multi_item_cart.py`) that passes in the real suite today.
 
 Full history of both, file by file and command by command, is in [AGENTIC_BUILD_LOG.md](AGENTIC_BUILD_LOG.md).
 
 ## CI/CD Pipeline
 
-`.github/workflows/tests.yml` runs on every push/PR to `master`/`develop`:
+`.github/workflows/tests.yml` runs on every push/PR to `main`/`develop`:
 
 1. `api-tests`, `api-tests-python`, and `ui-tests` run in parallel, each uploading test output and Allure results as artifacts.
 2. `test-summary` posts a pass/fail table to the run summary and fails the build if any suite failed.
