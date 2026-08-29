@@ -108,6 +108,15 @@ a Sauce Demo bug that would affect a real test run — `ui-tests`' existing
 `inventory_page.py.add_product_to_cart()` uses the same selector via
 `page.click()` and is a separately verified, working test path.)
 
+**A second, related known issue** (found while building `crawl-flows-cc`):
+the MCP browser's `localStorage` — including Sauce Demo's cart state — is
+*not* reset between separate `mcp_bridge.py` invocations, unlike
+pytest-playwright's fresh context per test. If a locator you're healing
+depends on cart/session state starting empty (e.g. an "Add to cart" vs.
+"Remove" button), clear it first with
+`window.localStorage.clear()` via `browser_evaluate`, then re-navigate —
+see `crawl-flows-cc/SKILL.md` for the full story of how this was discovered.
+
 ## What this skill deliberately does NOT do
 
 - No `ANTHROPIC_API_KEY`, no `anthropic` package, no `agentic/agent_loop.py`.

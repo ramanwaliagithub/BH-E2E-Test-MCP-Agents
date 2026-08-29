@@ -64,3 +64,4 @@ blob-report/
 .auth/
 .playwright-mcp/
 agentic/reports/
+agentic-claude-code/reports/

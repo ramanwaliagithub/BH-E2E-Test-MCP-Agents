@@ -1,0 +1,24 @@
+{
+  "flows": [
+    {
+      "name": "test_login_with_valid_credentials",
+      "status": "ok",
+      "findings": ""
+    },
+    {
+      "name": "test_login_with_invalid_credentials",
+      "status": "ok",
+      "findings": ""
+    },
+    {
+      "name": "test_login_with_locked_account",
+      "status": "ok",
+      "findings": ""
+    },
+    {
+      "name": "test_complete_purchase_flow",
+      "status": "drift",
+      "findings": "The flow itself works correctly end to end (cart badge shows '1', cart link navigates to /cart.html) when verified with a clean browser state. However, this test hardcodes its own selector literal (\"button[data-test='add-to-cart-sauce-labs-backpack']\") instead of referencing InventoryPage.ADD_TO_CART_BUTTON, which is currently broken (points to a nonexistent selector, '...-OLD-RENAMED'). The test passes today only because it bypasses the broken class constant entirely. If it is ever refactored to use inventory_page.ADD_TO_CART_BUTTON directly (the more idiomatic POM usage), it will fail. Worth reconciling the class constant and the test's literal value."
+    }
+  ]
+}

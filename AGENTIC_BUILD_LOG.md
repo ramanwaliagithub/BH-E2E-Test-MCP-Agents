@@ -822,3 +822,120 @@ broken) `ADD_TO_CART_BUTTON`/`REMOVE_FROM_CART_BUTTON` locators should
 independently flag both as `drift` or `broken` via `test_complete_purchase_flow`
 — the same two breaks the other two agents already fixed by different means,
 which would make a clean three-agent demo against one shared repo state.
+
+---
+
+## 2026-08-28 — Extending `agentic-claude-code/`: two new skills, both run live
+
+User chose to extend the zero-cost `agentic-claude-code/` variant to cover
+the other two agents next, rather than wait on API billing. Both new skills
+needed **no new Python files** — `mcp_bridge.py` (already generic: run an
+ordered MCP plan, print results) was reused unchanged, and the
+"conventions-gathering"/"code generation" logic that had to be hand-written
+in `agentic/agents/test_author.py` and `smoke_crawler.py` simply doesn't
+exist here — Claude Code's own `Read`/`Write` tools do that job directly.
+This is a real, demonstrated confirmation of the tradeoff written into
+`agentic/ADR.md` when `heal-locator-cc` was first built.
+
+**New environment note:** this session's `ui-tests/.venv` needed rebuilding
+(`rm -rf .venv && uv sync --extra agentic`) — same root cause as the earlier
+`C:\projects` vs `D:\Work\Github` alias issue, since this venv had also been
+created under the other Windows user account (`rwalia`) in a prior session.
+Re-verified `MCPClient` connects live (24 tools) after the rebuild. Also had
+to install the Playwright MCP server's own browser
+(`npx @playwright/mcp@latest install-browser chrome-for-testing`) fresh in
+this environment — same as the very first time this was needed, just a new
+machine/profile.
+
+### File: `.claude/skills/author-test-cc/SKILL.md`
+
+**Why:** the "run inside Claude Code" variant of `agentic/agents/test_author.py`.
+Procedure: read the real `ui-tests/pages/*.py`/`conftest.py`/`pytest.ini`/
+`test_login_flow.py` conventions directly (the `Read` tool — no
+`gather_pom_conventions()` function needed, that was only ever necessary
+because the standalone agent can't read files itself mid-conversation), plan
+and run MCP steps to verify the scenario live, then write the new test file
+directly (the `Write` tool) following those conventions exactly. Validates
+with `ast.parse()` via Bash before calling it done — same check as the
+standalone agent, just invoked directly instead of hand-coded.
+
+**Real demo run — scenario:** "Add the Sauce Labs Backpack and the Bike
+Light to the cart, then verify the cart shows 2 items" (same scenario
+already documented as the planned demo for the standalone `test_author.py`).
+
+**Commands run:**
+```bash
+# verified live: navigate, login, find the Bike Light's real data-test
+# attribute (add-to-cart-sauce-labs-bike-light — confirmed by evaluate,
+# not guessed from the naming pattern), then confirmed the 2-item cart
+# flow using the same click-no-op diagnostic workaround as heal-locator-cc
+ui-tests/.venv/Scripts/python.exe agentic-claude-code/mcp_bridge.py <plan.json>
+```
+Wrote `ui-tests/tests/test_multi_item_cart.py`, then validated and actually
+ran it through the real deterministic suite:
+```bash
+ui-tests/.venv/Scripts/python.exe -c "import ast; ast.parse(open('tests/test_multi_item_cart.py').read())"
+ui-tests/.venv/Scripts/python.exe -m pytest -v --tb=short tests/test_multi_item_cart.py
+```
+**Result:** `1 passed in 7.13s`. This is the strongest verification any agent
+in this whole project has gotten — not just "the logic is sound" but a real,
+newly-generated test passing in the actual CI-equivalent test runner.
+
+### File: `.claude/skills/crawl-flows-cc/SKILL.md`
+
+**Why:** the "run inside Claude Code" variant of `agentic/agents/smoke_crawler.py`.
+Procedure: read the real test file directly, walk each `test_*` function's
+flow live via MCP using its literal values, classify `ok`/`drift`/`broken`,
+write the report directly with `Write` — again, no Python helper needed for
+any of that.
+
+**Real demo run** — crawled `ui-tests/tests/test_login_flow.py`'s 4 flows:
+
+1. `test_login_with_valid_credentials` — **ok** (6 products after login).
+2. `test_login_with_invalid_credentials` — **ok** (error text matched).
+3. `test_login_with_locked_account` — **ok** (error text matched).
+4. `test_complete_purchase_flow` — **drift**. This flow hardcodes its own
+   correct selector literal (`"button[data-test='add-to-cart-sauce-labs-backpack']"`)
+   instead of referencing `InventoryPage.ADD_TO_CART_BUTTON` (currently
+   broken). The test passes today only because it never touches the broken
+   class constant — a real maintainability gap a pass/fail assertion can't
+   surface, and exactly the kind of finding the `ok`/`drift`/`broken` scale
+   (instead of a binary) exists to catch.
+
+**Real problem hit and diagnosed mid-crawl:** step 5 of the first attempt at
+flow 4 threw `TypeError: Cannot read properties of null (reading 'click')` —
+the backpack's "Add to cart" button didn't exist, because the cart badge
+already showed "2" *before that step even ran*. Investigated via a
+read-only `browser_evaluate` reading `Object.keys(window.localStorage)`:
+returned `["backtrace-guid", "backtrace-last-active", "cart-contents"]` —
+confirmed Sauce Demo persists its cart in `localStorage`, and the MCP
+server's browser profile carried that state over from the `author-test-cc`
+run minutes earlier (unlike `pytest-playwright`, which gives every test a
+fresh isolated context — this repo's own `ui-tests/conftest.py` docstring
+says so explicitly). Fixed by clearing state before re-checking:
+```json
+{"tool": "browser_evaluate", "args": {"function": "() => { window.localStorage.clear(); return {cleared: true}; }"}}
+```
+followed by a fresh `browser_navigate`. Re-ran clean: cart badge correctly
+showed `"1"` and the cart link correctly navigated to `/cart.html` — flow 4's
+actual behavior is fine; the false "drift" signal was contamination from
+this crawling tool's browser reuse, not a real app or test problem.
+Documented as a second "Known issue" in `crawl-flows-cc/SKILL.md`, with
+cross-references added to `heal-locator-cc/SKILL.md` and
+`author-test-cc/SKILL.md` since both drive the same MCP browser and could
+hit the same contamination.
+
+**Report saved and kept as a permanent example** (not gitignored like future
+reports would be) at
+`agentic-claude-code/examples/smoke_crawl_test_login_flow.json` — this first
+report is real proof-of-concept output, same treatment as the two
+`heal_*_button.steps.json` examples. Added `agentic/reports/` and
+`agentic-claude-code/reports/` to `.gitignore` for future runs.
+
+### Docs updated
+
+`agentic-claude-code/README.md` rewritten to cover all three skills (was
+locator-healing-only) — including correcting a claim that "nothing here
+writes to ui-tests/," which stopped being true the moment `author-test-cc`
+was built (same correction already made once for `agentic/ADR.md` when
+`test_author.py` was built there).
