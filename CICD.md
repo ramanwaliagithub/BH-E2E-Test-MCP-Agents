@@ -47,13 +47,18 @@ a real, well-designed test. So:
 Worth being precise about this, since it's the one people ask about first.
 `agentic-claude-code/`'s entire value proposition — no separate billing — comes
 from the fact that a *human's already-open, already-paying-for* Claude
-Code/Pro session does the reasoning. There is no way to invoke that
-headlessly in a GitHub Actions runner without giving Claude Code its own
-API key for non-interactive/`-p` mode — at which point it is paying the
-exact same metered Anthropic API cost as `agentic/` does, so there's no
-hidden "free automation" path here. **Only `agentic/`'s standalone Python
-agents (`anthropic` SDK, direct API key) are real CI candidates.** Everything
-below is about `agentic/` only.
+Code/Pro session does the reasoning. Running Claude Code non-interactively in
+CI is technically possible — Anthropic publishes an official
+`claude-code-action` for GitHub Actions, and the CLI itself supports a
+non-interactive `claude -p "<prompt>"` mode — but either path still needs its
+own credentials configured for that runner. There is no version of "run
+Claude Code in CI" that's free the way an interactive session under your
+subscription is; the moment it runs unattended, it's paying the exact same
+metered Anthropic API cost `agentic/` already pays, so there's no hidden
+"free automation" path here. **Only `agentic/`'s standalone Python agents
+(`anthropic` SDK, direct API key) are real CI candidates**, since their cost
+is already accounted for and they're ordinary programs any runner can
+execute. Everything below is about `agentic/` only.
 
 ## Trigger model per agent
 
@@ -76,9 +81,14 @@ on:
     - cron: "0 6 * * *"   # once a day, off peak — tune to actual cost tolerance
   workflow_dispatch: {}    # allow an on-demand run too
 
+concurrency:
+  group: agentic-smoke-crawl
+  cancel-in-progress: true   # a fresher crawl supersedes a stale one in flight
+
 jobs:
   crawl:
     runs-on: ubuntu-latest
+    timeout-minutes: 15        # caps a stuck/looping run's blast radius, on top of agent_loop.py's own iteration cap
     continue-on-error: true   # never let this job's outcome affect the run's overall status
     environment: agentic-llm  # see "Secrets" below — gates secret exposure separately from branch protection
     steps:
@@ -134,13 +144,21 @@ on:
       url:
         required: true
 
+concurrency:
+  group: agentic-heal-locator
+  cancel-in-progress: false   # let an in-flight heal finish; don't discard its API spend
+
 jobs:
   heal:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment: agentic-llm
     steps:
       - uses: actions/checkout@v4
-      # ...same setup as above...
+      # ...same setup as above, run from repo root — agentic/ is a sibling of
+      # ui-tests/, not inside it, so `-m agentic.agents.X` only resolves when
+      # the working directory is the repo root, not `./ui-tests` (verified the
+      # hard way: ModuleNotFoundError otherwise)...
       - name: Run healer
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -153,8 +171,12 @@ jobs:
         uses: peter-evans/create-pull-request@v6
         with:
           title: "agentic: heal ${{ inputs.locator }}"
-          branch: agentic/heal-${{ inputs.locator }}
+          branch: agentic/heal-${{ inputs.locator }}-${{ github.run_id }}
           commit-message: "Propose fix for ${{ inputs.locator }} (agentic locator healer)"
+          draft: true   # never opens as a mergeable-looking PR by accident
+          body: |
+            Opened automatically by the self-healing locator agent.
+            **A human must review before merging** — nothing here is trusted by default.
           # apply diff.patch to the working tree before this step in a real setup
 ```
 
@@ -163,10 +185,31 @@ have actually seen (Renovate, Dependabot, "explain this CI failure" bots): a
 human comments `/heal-locator ADD_TO_CART_BUTTON` on a PR or issue, an
 `issue_comment` trigger picks it up, runs the agent, and posts the diff back
 as a reply — or opens a follow-up PR the same way as above. More
-discoverable for a team than remembering to go find the Actions tab.
+discoverable for a team than remembering to go find the Actions tab:
+
+```yaml
+# excerpt — trigger condition only
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  heal:
+    if: |
+      github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/heal-locator')
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "parse ${{ github.event.comment.body }} into inputs, then run the same steps as the workflow_dispatch version"
+```
+
+Worth building once the manual `workflow_dispatch` version has proven
+itself — not a first step (see "Suggested rollout" below).
 
 The test-author workflow is structurally identical to the healer's, with
-`scenario`/`output` inputs instead.
+`scenario`/`output` inputs instead — `workflow_dispatch`-only is the better
+fit there, since authoring a new test needs a written scenario that doesn't
+compress well into a one-line PR comment.
 
 ## Secrets: gate exposure before the job even runs, not just before merge
 
@@ -195,6 +238,11 @@ hypothetical, way to get an unpleasant bill:
   — rate-limit per user/per day, not just per workflow.
 - Treat the smoke-crawler's cron schedule as a cost dial, not a fixed fact —
   daily vs. weekly is a real cost/staleness tradeoff to make consciously.
+- **Tool allow-listing already exists at the code level and CI gets it for
+  free.** `ALLOWED_TOOLS` in each agent, enforced inside `agent_loop.py`,
+  already restricts what the model can even see or call — a CI job doesn't
+  need to reimplement that boundary, only run the same code, since the
+  restriction travels with it.
 
 ## Status reporting: advisory, not pass/fail
 
@@ -218,11 +266,28 @@ on separate triggers, feeding a separate outcome (a proposal PR or a report)
 that goes through the exact same human-reviewed merge path as any other
 change to this repo.
 
-## Status
+## Suggested rollout — start small, expand deliberately
 
-Design only — no workflow files have been added yet. Before actually
-enabling any of this: fund the Anthropic API account (see `RUN.md`), verify
-`agentic/`'s three agents run correctly locally first (they haven't, yet),
-then implement one workflow at a time, starting with the lowest-risk one
-(smoke-crawler, since it only ever posts a report) before the two that open
-PRs.
+Design only — no workflow files have been added yet, and before enabling
+any of this the Anthropic API account needs to actually be funded and
+`agentic/`'s three agents verified locally first (see `RUN.md`) — none have
+run live yet. Once that's done, a staged rollout beats enabling all three
+workflows at once:
+
+1. **Level 1 — start here:** `workflow_dispatch`-only for the locator
+   healer. Nothing scheduled, nothing auto-triggered — a human clicks "Run
+   workflow" by hand when a locator breaks. Lowest risk, easiest to reason
+   about, and proves the PR-opening mechanism (`peter-evans/create-pull-request`,
+   draft PRs, review gate) works before anything runs unattended.
+2. **Level 2:** add the scheduled smoke-crawler (nightly), posting to the
+   step summary + artifact only — still no PRs, no auto-filed issues, just
+   visibility into drift.
+3. **Level 3:** the smoke-crawler auto-files a GitHub Issue when a flow
+   comes back `drift`/`broken` — still never fails a build, just makes
+   findings harder to silently ignore.
+4. **Level 4 — optional, more mature:** the ChatOps comment trigger for the
+   healer, so any contributor can request a fix suggestion from a PR without
+   touching the Actions tab.
+
+Nothing here is required to get value from Level 1 — the later levels are
+what a mature setup eventually looks like, not where you have to start.
